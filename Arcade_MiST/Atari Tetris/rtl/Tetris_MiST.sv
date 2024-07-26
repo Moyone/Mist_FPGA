@@ -27,7 +27,7 @@ module Tetris_MiST(
 `endif
 
 	input         SPI_SCK,
-	inout         SPI_DO,
+	output        SPI_DO,
 	input         SPI_DI,
 	input         SPI_SS2,    // data_io
 	input         SPI_SS3,    // OSD
@@ -87,6 +87,7 @@ module Tetris_MiST(
 `ifdef USE_AUDIO_IN
 	input         AUDIO_IN,
 `endif
+
 	input         UART_RX,
 	output        UART_TX
 
@@ -142,10 +143,11 @@ assign SDRAM2_nRAS = 1;
 assign SDRAM2_nWE = 1;
 `endif
 
-`include "build_id.v" 
+`include "build_id.vh" 
 
 localparam CONF_STR = {
 	"TETRIS;;",
+	"O7,Pause game,Off,On;",
 	"O2,Service,Off,On;",
 	"O34,Scanlines,Off,25%,50%,75%;",
 	"O5,Blend,Off,On;",
@@ -161,7 +163,7 @@ wire       rotate    = 0;
 wire       blend     = status[5];
 
 assign LED = ~(ioctl_downl | ioctl_upl);
-assign SDRAM_CLK = clk_sd;
+//assign SDRAM_CLK = clk_sd;
 assign SDRAM_CKE = 1;
 assign AUDIO_R = AUDIO_L;
 
@@ -169,9 +171,9 @@ wire clk_sys, clk_sd;
 wire pll_locked;
 pll_mist pll(
 	.inclk0(CLOCK_27),
-	.areset(0),
 	.c0(clk_sd),//3xclk_sys
 	.c1(clk_sys),//14.318
+	.c2(SDRAM_CLK),
 	.locked(pll_locked)
 	);
 
@@ -197,6 +199,10 @@ wire        i2c_ack;
 wire        i2c_end;
 `endif
 
+wire spi_do_uio;
+wire spi_do_dio;
+assign SPI_DO = CONF_DATA0 ? spi_do_dio : spi_do_uio; // DO comes from user_io when CONF_DATA0 is low
+
 user_io #(
 	.STRLEN(($size(CONF_STR)>>3)),
 	.FEATURES(32'h0 | (BIG_OSD << 13) | (HDMI << 14)))
@@ -205,7 +211,7 @@ user_io(
 	.conf_str       (CONF_STR       ),
 	.SPI_CLK        (SPI_SCK        ),
 	.SPI_SS_IO      (CONF_DATA0     ),
-	.SPI_MISO       (SPI_DO         ),
+	.SPI_MISO       (spi_do_uio     ),
 	.SPI_MOSI       (SPI_DI         ),
 	.buttons        (buttons        ),
 	.switches       (switches       ),
@@ -247,7 +253,7 @@ data_io data_io(
 	.SPI_SCK       ( SPI_SCK      ),
 	.SPI_SS2       ( SPI_SS2      ),
 	.SPI_DI        ( SPI_DI       ),
-	.SPI_DO        ( SPI_DO       ),
+	.SPI_DO        ( spi_do_dio   ),
 	.ioctl_download( ioctl_downl  ),
 	.ioctl_upload  ( ioctl_upl    ),
 	.ioctl_index   ( ioctl_index  ),
@@ -312,6 +318,7 @@ always @(posedge clk_sd) begin
 end
 
 wire [10:0] INP = ~{status[2],1'b1, m_coin1 | m_coin2, m_left2, m_right2, m_down2, m_fire2A, m_left, m_right, m_down, m_fireA};
+wire PAUSE = ~status[7];
 wire [15:0] audio;
 wire        hs, vs, hb, vb;
 wire  [2:0] g, r;
@@ -322,6 +329,8 @@ FPGA_ATetris FPGA_ATetris(
 	.RESET(reset),
 	
 	.INP(INP),		// Negative Logic
+	
+	.PAUSE(PAUSE),
 
 	.HPOS(HPOS),
 	.VPOS(VPOS),
@@ -378,6 +387,7 @@ mist_video #(.COLOR_DEPTH(3), .OUT_COLOR_DEPTH(VGA_BITS), .SD_HCNT_WIDTH(10), .B
 	.VGA_B          ( VGA_B            ),
 	.VGA_VS         ( VGA_VS           ),
 	.VGA_HS         ( VGA_HS           ),
+
 	.ce_divider     ( 3'd1             ),
 	.blend          ( blend            ),
 	.no_csync       ( no_csync         ),
@@ -445,16 +455,37 @@ dac_l(
 	);
 
 `ifdef I2S_AUDIO
-i2s i2s (
-	.reset(1'b0),
-	.clk(clk_sd),
-	.clk_rate(32'd42_960_000),
-	.sclk(I2S_BCK),
-	.lrclk(I2S_LRCK),
-	.sdata(I2S_DATA),
-	.left_chan({~audio[15], audio[14:0]}),
-	.right_chan({~audio[15], audio[14:0]}),
+reg I2S_BCK_, I2S_LRCK_, I2S_DATA_;
+
+assign I2S_BCK = I2S_BCK_;
+assign I2S_LRCK = I2S_LRCK_; 
+assign I2S_DATA = I2S_DATA_;
+
+//i2s i2s (
+//	.reset(1'b0),
+//	.clk(clk_sd),
+//	.clk_rate(32'd42_960_000),
+//	.sclk(I2S_BCK_),
+//	.lrclk(I2S_LRCK_),
+//	.sdata(I2S_DATA_),
+//	.left_chan({~audio[15], audio[14:0]}),
+//	.right_chan({~audio[15], audio[14:0]})
+//);
+// I2S audio
+wire I2S_MCLK;
+
+audio_top audio_i2s (
+  .clk_50MHz(CLOCK_27),
+  .dac_MCLK(I2S_MCLK),
+  .dac_SCLK(I2S_BCK_),
+  .dac_SDIN(I2S_DATA_),
+  .dac_LRCK(I2S_LRCK_),
+//  .L_data({~audio[15], audio[14:0]}),
+//  .R_data({~audio[15], audio[14:0]})        
+  .L_data(audio),
+  .R_data(audio)
 );
+
 `ifdef I2S_AUDIO_HDMI
 assign HDMI_MCLK = 0;
 always @(posedge clk_sd) begin
@@ -494,5 +525,24 @@ arcade_inputs inputs (
 	.player1     ( {m_fireD, m_fireC, m_fireB, m_fireA, m_up, m_down, m_left, m_right} ),
 	.player2     ( {m_fire2D, m_fire2C, m_fire2B, m_fire2A, m_up2, m_down2, m_left2, m_right2} )
 );
+
+
+reg [7:0] vga_red;
+reg [7:0] vga_green;
+reg [7:0] vga_blue;
+reg vga_hsync;
+reg vga_vsync;
+
+reg [7:0] vga_red_w;
+reg [7:0] vga_green_w;
+reg [7:0] vga_blue_w;
+reg vga_hsync_w;
+reg vga_vsync_w;
+
+reg vga_clk;
+reg vga_ce;
+
+reg scan2x_enb;
+reg scan2x_toggle;
 
 endmodule 

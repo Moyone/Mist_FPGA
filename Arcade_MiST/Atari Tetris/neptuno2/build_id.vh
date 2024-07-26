@@ -1,0 +1,5 @@
+`define BUILD_DATE "240429"
+`define BUILD_TIME "194500"
+//`define NO_DIRECT_UPLOAD 1
+`define I2S_AUDIO 1
+`define ZXA200T 1

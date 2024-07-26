@@ -155,7 +155,7 @@ entity T65 is
     VPA     : out std_logic;
     A       : out std_logic_vector(23 downto 0);
     DI      : in  std_logic_vector(7 downto 0);
-    DO      : out std_logic_vector(7 downto 0);
+    DO_2      : out std_logic_vector(7 downto 0);
     -- 6502 registers (MSB) PC, SP, P, Y, X, A (LSB)
     Regs    : out std_logic_vector(63 downto 0);
     DEBUG   : out T_t65_dbg;
@@ -646,7 +646,7 @@ begin
   -- This is the P that gets pushed on stack with correct B flag. I'm not sure if NMI also clears B, but I guess it does.
   PwithB<=(P and x"ef") when (IRQCycle='1' or NMICycle='1') else P;
 
-  DO <= DO_r;
+  DO_2 <= DO_r;
 
   with Write_Data_r select
     DO_r <=
